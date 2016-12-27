@@ -1,12 +1,14 @@
 import os
 import csv
+import string
+
 
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk import tokenize
 from nltk import pos_tag, ne_chunk, word_tokenize
 from nltk.tokenize import SpaceTokenizer
 from nltk.tree import Tree
-
+from nltk.metrics import *
 
 # A container class for storing company information. 
 class CompanyInfo():
@@ -15,7 +17,7 @@ class CompanyInfo():
         self.asxCode = csvRow[1]
         self.gicsIndustryGroup = csvRow[2]
         self.aliases = csvRow[3]
-        self.ceoAliases = csvRow[4]
+        self.people = csvRow[4]
         self.companyNameModified = ''
         self.removedWords = ''
         self.businessArea = ''
@@ -24,23 +26,23 @@ class CompanyInfo():
 # A container class for storing the output from the headline parser. 
 # Each company mentioned in a headline is assigned its own instance of this class. 
 class HeadlineResult():
-    def __init__(self, timestamp, companyCode, confidenceOfCode, sentiment, keywordList):
+    def __init__(self, timestamp, companyCode, confidenceOfCode, sentiment, companyName, keywordList):
         self.timestamp = timestamp
         self.companyCode = companyCode
         self.confidenceOfCode = confidenceOfCode #How reliably we think that this company code cas been mentioned in the article. 
         self.sentiment = sentiment
+        self.companyName = companyName
         self.keywordList = keywordList
 
 # Reads headlines, determines if company is mentioned and gauges sentiment. 
 class HeadlineParser():
-    # Level 0
+# Level 0
     def __init__ (self, companyNamesPath):
         self.companyInfo = self._loadCompanyInfo(companyNamesPath)
         # Create the sentiment analyser. 
         self.sentiment = SentimentIntensityAnalyzer()
         self.tokenizer = SpaceTokenizer()
 
-    # Level 0
     # Return one headline result object for each company we think is mentioned or affected by this article. 
     def parseHeadline(self, headline, dateString):
         resultList = []
@@ -49,31 +51,13 @@ class HeadlineParser():
 
         headlineNames = self._getProperNouns(headline)
 
-        codes, confidences = self._matchCompanyToName(headlineNames)
+        codes, confidences, names = self._matchCompanyToName(headlineNames)
 
         for index in range(len(codes)):
-            resultList.append(HeadlineResult(dateString, codes[index], confidences[index], sentiment, ''))
-
-       # for name in properNouns:
-            ## Find likely matches between the named entities from the headline and the list of asx 200 companies.
-
-            #resultList.append(HeadlineResult(dateString, name, sentiment, ''))
+            resultList.append(HeadlineResult(dateString, codes[index], confidences[index], sentiment, names[index], ''))
         return resultList
-    # Level 1
-    def _matchCompanyToName(self, names)
-        companyCodes = []
-        companyConfidences = []
-        for name in names:
-            
-            for index in range(len(self.companyInfo)):
-                # if company info has aliases, use those instead of the name
-                # if company info has ceo names or notable people, use those as well
-                # test the company name by itself first, then try with business area words, then try with company structure words.
 
-
-                # Add the results of all of these tests together to give a combined confidence. 
-    
-    # Level 1
+# Level 1
     def _loadCompanyInfo(self, filePath):
         companyInfo = []
         #print('Importing company names data...')
@@ -83,9 +67,21 @@ class HeadlineParser():
             for row in reader:
                 companyInfo.append(CompanyInfo([column.upper() for column in row]))
 
-        companyStructureWords = ['THE', ' LIMITED', ' LTD', ' COMPANY', ' FUND', ' CORPORATION', ' PLC', ' HOLDINGS', ' GROUP', ' INCORPORATED', ' CONSOLIDATED', ' ENTERPRISES', ' STAPLED', ' NZX', ' NZ', ' CO.', ' FORUS', ' TRUST']
+        companyStructureWords = []
+        companyStructureWords = companyStructureWords + ['THE', ' LIMITED', ' LTD', ' COMPANY', ' FUND', ' CORPORATION', ' PLC']
+        companyStructureWords = companyStructureWords + [' HOLDINGS', ' GROUP', ' INCORPORATED', ' CONSOLIDATED', ' ENTERPRISES']
+        companyStructureWords = companyStructureWords + [' STAPLED', ' NZX', ' NZ', ' CO.', ' FORUS', ' TRUST']
 
-        businessAreaWords = [' MINING', ' PETROLEUM', ' COMMUNICATIONS', ' SERVICES', ' RESOURCES', ' MINERALS', ' ENTERTAINMENT', ' PROPERTY', ' MINERAL', ' HEALTHCARE', ' HEALTH CARE', ' INVESTMENTS', ' AIRWAYS', ' AIR WAYS', ' LEISURE', ' ENERGY', ' TRAVEL', ' METALS', ' COAL', ' BANKING', ' MEDIA', ' BUILDING', ' TELECOM', ' HEALTH', ' INVESTMENT', ' MANAGEMENT', ' METAL', ' PHARMACEUTICALS', ' ASSET', ' FINANCIAL', ' ROADS', ' INDUSTRIES', ' PROPERTIES',  ' LIFESTYLE', ' RESORTS', ' STEEL', ' WASTE', ' RETAIL', ' MEDICAL', ' TELEVISION', ' MORTGAGE', ' INSURANCE', ' ADMINISTRATION', ' CARE', ' PHARMACEUTICAL', ' AGRICULTURAL', ' ORD UNITS']
+        businessAreaWords = []
+        businessAreaWords = businessAreaWords + [' MINING', ' PETROLEUM', ' COMMUNICATIONS', ' SERVICES', ' RESOURCES', ' MINERALS']
+        businessAreaWords = businessAreaWords + [' ENTERTAINMENT', ' PROPERTY', ' MINERAL', ' HEALTHCARE', ' HEALTH CARE', ' INVESTMENTS']
+        businessAreaWords = businessAreaWords + [' AIRWAYS', ' AIR WAYS', ' LEISURE', ' ENERGY', ' TRAVEL', ' METALS', ' COAL', ' BANKING']
+        businessAreaWords = businessAreaWords + [' MEDIA', ' BUILDING', ' TELECOM', ' HEALTH', ' INVESTMENT', ' MANAGEMENT', ' METAL']
+        businessAreaWords = businessAreaWords + [' PHARMACEUTICALS', ' ASSET', ' FINANCIAL', ' ROADS', ' INDUSTRIES', ' PROPERTIES']
+        businessAreaWords = businessAreaWords + [' LIFESTYLE', ' RESORTS', ' STEEL', ' WASTE', ' RETAIL', ' MEDICAL', ' TELEVISION']
+        businessAreaWords = businessAreaWords + [' MORTGAGE', ' INSURANCE', ' ADMINISTRATION', ' CARE', ' PHARMACEUTICAL', ' AGRICULTURAL']
+        businessAreaWords = businessAreaWords + [' ORD UNITS', ' OUTDOOR', ' NEWS']
+
         locationWords = [' AUSTRALASIA', ' AUSTRALIA', ' WORLDWIDE', ' GLOBAL', ' PACIFIC', ' NEW ZEALAND']
 
         for index in range(len(companyInfo)):
@@ -101,6 +97,13 @@ class HeadlineParser():
             nameModified, location = self._removeSelectedWords(companyInfo[index].companyNameModified, locationWords)
             companyInfo[index].companyNameModified = nameModified
             companyInfo[index].location = location
+
+
+            companyInfo[index].companyNameModified = self._stripNames(companyInfo[index].companyNameModified)
+            companyInfo[index].removedWords        = self._stripNames(companyInfo[index].removedWords)
+            companyInfo[index].businessArea        = self._stripNames(companyInfo[index].businessArea)
+            companyInfo[index].location            = self._stripNames(companyInfo[index].location)
+            
             
         return companyInfo
 
@@ -142,7 +145,60 @@ class HeadlineParser():
     def _getKeyWords(self, headlineString):
         return 0    
 
-    # Level 2
+    #Plan of attack
+    # compare each name to each company. For each company,
+    # compare the name to the company name, company name plus business area, company aliases and company people
+    # The metric for similarity is the jaccard index. 
+    # The comparison with the minimum jaccard index is taken to represent the comparison between the company and the name. 
+    def _matchCompanyToName(self, names):
+        companyCodes = []
+        companyConfidences = []
+        companyNames = []
+        for name in names:
+            name = self._stripNames(name)
+            for index in range(len(self.companyInfo)):
+                
+                companyName = self.companyInfo[index].companyNameModified
+                nameBusinessArea = companyName + self.companyInfo[index].businessArea
+                
+                nameDist = jaccard_distance(set(list(name)), set(list(companyName)))
+                nameBusinessAreaDist = jaccard_distance(set(list(name)), set(list(nameBusinessArea)))
+
+                # alias match is the maximum match of all listed aliases
+                if len(self.companyInfo[index].aliases)>0:
+                    aliases = self.companyInfo[index].aliases.split('_')
+                    aliasDists = []
+                    for alias in aliases:
+                        aliasDists.append(jaccard_distance(set(list(name)), set(list(alias))))
+                    aliasDist = min(aliasDists)
+                else:
+                    aliasDist = 1
+
+                # people match is the maximum match of all listed names. 
+                if len(self.companyInfo[index].people)>0:
+                    people = self.companyInfo[index].people.split('_')
+                    peopleDists = []
+                    for person in people:
+                        peopleDists.append(jaccard_distance(set(list(name)), set(list(person))))
+                    peopleDist = min(peopleDists)
+                else:
+                    peopleDist = 1
+
+                companyMatch = 1- min([nameDist, nameBusinessAreaDist, aliasDist, peopleDist])
+
+                if companyMatch > 0.7:
+                    #print '     ', companyName, ' _ ', nameBusinessArea
+                    #print '     ', str(1-nameDist), ' _ ', str(1-nameBusinessAreaDist), ' _ ', str(1-aliasDist)
+                    companyCodes.append(self.companyInfo[index].asxCode)
+                    companyConfidences.append(companyMatch)
+                    companyNames.append(self.companyInfo[index].companyName)
+
+
+        return companyCodes, companyConfidences, companyNames
+
+# Level 2
+    # Remove all instances of the words contained in the wordsToRemoveList
+    # Store the removed words in removedWords, store the remainder in name
     def _removeSelectedWords(self, name, wordsToRemove):
         removedWords = ''
         for word in wordsToRemove:
@@ -158,25 +214,22 @@ class HeadlineParser():
         removedWords = removedWords.strip()
         return name, removedWords
 
+    # Convert string to uppercase, remove spaces and remove punctuation
+    def _stripNames(self, name):
+        name.translate(None, string.punctuation)
+        name = name.upper().replace(' ', '')
+        return name
+
+#Main
 if __name__ == "__main__":
     headlineparser = HeadlineParser('20161201-asx200.csv')
-    for company in headlineparser.companyInfo:
-        print company.companyNameModified + '   ' + company.businessArea + '   ' + company.location + '   ' + company.removedWords
+
     dateString = '01_Jan_2016'
+    headlineList = ["Explosion in Bluescope factory linked to operational defects.", "Apn outdoor takes lion's share of merger", "4 dead on Dreamworld ride.", "Commbank loses out big on shaky investments", "Woodside closes slightly down on weak exports", "Ardent CEO to address Dreamworld tragedy", "Andrew Wood dead at 65", "Peter Meurs has given up a job managing Fortescue's $US9.2 billion expansion project to pursue his true passion"]
 
-    headlineList = ["China weakens its stance on abortion. I feel good about it.", "Explosion in Altura factory linked to operational defects.", "Sabotage on SpaceX rocket not yet ruled out.", "4 dead on Dreamworld ride.", "Bega's Barry Irvin can't find the magic formula to crack Chinese market", "Nescafe sued Moccona for $100m.", "Ardent CEO to address Dreamworld tragedy"]
-   # for line in headlineList:
-   # 
-   #     resultList = headlineparser.parseHeadline(line, dateString)
-   #     for result in resultList:
-   #         print result.companyCode
-   #         print result.sentiment
-
-   # dateString = ""
-   # # Test the ability of the NER to find company name from other usesless words like limited or company. 
-   # for company in headlineparser.companyInfo:
-   # 
-   #     resultList = headlineparser.parseHeadline(company.companyName, dateString)
-   #     for result in resultList:
-   #         print company.companyName, "  ", result.companyCode, "  ", str(result.sentiment) 
-            
+    for line in headlineList:
+        print ''
+        print line
+        resultList = headlineparser.parseHeadline(line, dateString)
+        for result in resultList:
+            print result.companyCode + '  ' + str(result.sentiment) + '   ' + str(result.confidenceOfCode) + '  ' + result.companyName
