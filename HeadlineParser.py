@@ -2,7 +2,6 @@ import os
 import csv
 import string
 
-
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk import tokenize
 from nltk import pos_tag, ne_chunk, word_tokenize
@@ -10,29 +9,31 @@ from nltk.tokenize import SpaceTokenizer
 from nltk.tree import Tree
 from nltk.metrics import *
 
+from Databaser import Databaser
+
 # A container class for storing company information. 
 class CompanyInfo():
     def __init__(self, csvRow):
-        self.companyName = csvRow[0]
-        self.asxCode = csvRow[1]
-        self.gicsIndustryGroup = csvRow[2]
-        self.aliases = csvRow[3]
-        self.people = csvRow[4]
+        self.companyName         = csvRow[0]
+        self.asxCode             = csvRow[1]
+        self.gicsIndustryGroup   = csvRow[2]
+        self.aliases             = csvRow[3]
+        self.people              = csvRow[4]
         self.companyNameModified = ''
-        self.removedWords = ''
-        self.businessArea = ''
-        self.location = ''
+        self.removedWords        = ''
+        self.businessArea        = ''
+        self.location            = ''
 
 # A container class for storing the output from the headline parser. 
 # Each company mentioned in a headline is assigned its own instance of this class. 
 class HeadlineResult():
     def __init__(self, timestamp, companyCode, confidenceOfCode, sentiment, companyName, keywordList):
-        self.timestamp = timestamp
-        self.companyCode = companyCode
+        self.timestamp        = timestamp
+        self.companyCode      = companyCode
         self.confidenceOfCode = confidenceOfCode #How reliably we think that this company code cas been mentioned in the article. 
-        self.sentiment = sentiment
-        self.companyName = companyName
-        self.keywordList = keywordList
+        self.sentiment        = sentiment
+        self.companyName      = companyName
+        self.keywordList      = keywordList
 
 # Reads headlines, determines if company is mentioned and gauges sentiment. 
 class HeadlineParser():
@@ -49,6 +50,7 @@ class HeadlineParser():
 
         sentiment = self._getSentiment(headline)
 
+        headline, removedWords = self._removeSelectedWords(headline, ['.com', '.COM', '.Com'])
         headlineNames = self._getProperNouns(headline)
 
         codes, confidences, names = self._matchCompanyToName(headlineNames)
@@ -82,7 +84,7 @@ class HeadlineParser():
         businessAreaWords = businessAreaWords + [' MORTGAGE', ' INSURANCE', ' ADMINISTRATION', ' CARE', ' PHARMACEUTICAL', ' AGRICULTURAL']
         businessAreaWords = businessAreaWords + [' ORD UNITS', ' OUTDOOR', ' NEWS']
 
-        locationWords = [' AUSTRALASIA', ' AUSTRALIA', ' WORLDWIDE', ' GLOBAL', ' PACIFIC', ' NEW ZEALAND']
+        locationWords = [' AUSTRALASIA', ' AUSTRALIA', ' WORLDWIDE', ' GLOBAL', ' PACIFIC', ' NEW ZEALAND', '.COM']
 
         for index in range(len(companyInfo)):
 
@@ -186,7 +188,9 @@ class HeadlineParser():
 
                 companyMatch = 1- min([nameDist, nameBusinessAreaDist, aliasDist, peopleDist])
 
-                if companyMatch > 0.7:
+                minMatch = 0.7
+                if companyMatch >= minMatch:
+                    companyMatch = (companyMatch - minMatch) / (1 - minMatch)
                     #print '     ', companyName, ' _ ', nameBusinessArea
                     #print '     ', str(1-nameDist), ' _ ', str(1-nameBusinessAreaDist), ' _ ', str(1-aliasDist)
                     companyCodes.append(self.companyInfo[index].asxCode)
@@ -222,14 +226,19 @@ class HeadlineParser():
 
 #Main
 if __name__ == "__main__":
+    databasePath = '/home/richard/testHeadline.db'
+
     headlineparser = HeadlineParser('20161201-asx200.csv')
+    databaser = Databaser(databasePath)
 
     dateString = '01_Jan_2016'
-    headlineList = ["Explosion in Bluescope factory linked to operational defects.", "Apn outdoor takes lion's share of merger", "4 dead on Dreamworld ride.", "Commbank loses out big on shaky investments", "Woodside closes slightly down on weak exports", "Ardent CEO to address Dreamworld tragedy", "Andrew Wood dead at 65", "Peter Meurs has given up a job managing Fortescue's $US9.2 billion expansion project to pursue his true passion"]
+    headlineList = ['Webjet is the worst website ever', 'ASX recieves positive reviews', 'Alumina at all time high value', 'CarSales.com has been linked with debilitating skin cancer']
 
     for line in headlineList:
-        print ''
         print line
         resultList = headlineparser.parseHeadline(line, dateString)
         for result in resultList:
+            databaser.addRow(headline, result)
             print result.companyCode + '  ' + str(result.sentiment) + '   ' + str(result.confidenceOfCode) + '  ' + result.companyName
+
+    databaser.close()
